@@ -1,139 +1,80 @@
 from playwright.sync_api import sync_playwright
 import traceback
 
-from src.agent.selector_healer import heal_selector
-from src.agent.dom_memory import capture_dom
 from src.config.config_loader import config
+from src.agent.dom_memory import capture_dom
+from src.reporting.html_reporter import save_screenshot
 
 
-BASE_URL = config["app"]["base_url"]
+BASE_URL = config["app"]["base_url"].rstrip("/")
 LOGIN_URL = f"{BASE_URL}/login"
 
-HEADLESS = config["browser"]["headless"]
-SLOW_MO = config["browser"]["slow_mo"]
+HEADLESS = bool(config["browser"].get("headless", True))
+SLOW_MO = int(config["browser"].get("slow_mo", 0))
 
 LOGIN_DATA = config["test_data"]["login"]
-
 
 SELECTORS = {
     "email": "[data-test='login-email']",
     "password": "[data-test='login-password']",
-    "submit": "[data-test='login-submit']"
+    "submit": "[data-test='login-submit']",
+    "error": "[data-test='login-error']",
 }
 
 
-def safe_fill(page, field, value):
-
+def execute_login() -> dict:
+    """
+    Returns:
+      {"status":"passed","error":None,"screenshot": "...optional..."}
+      {"status":"failed","error":"...","trace":"...","screenshot":"...optional..."}
+    """
+    test_name = "login"
     try:
-        page.locator(SELECTORS[field]).fill(value)
-
-    except Exception:
-
-        print(f"[Healer] Healing selector for {field}")
-
-        healed = heal_selector(page, SELECTORS[field], field)
-
-        SELECTORS[field] = healed
-
-        page.locator(healed).fill(value)
-
-
-def safe_click(page, field):
-
-    try:
-        page.locator(SELECTORS[field]).click()
-
-    except Exception:
-
-        healed = heal_selector(page, SELECTORS[field], field)
-
-        SELECTORS[field] = healed
-
-        page.locator(healed).click()
-
-
-def execute_login():
-
-    goal = "User login"
-
-    try:
-
         with sync_playwright() as p:
-
-            browser = p.chromium.launch(
-                headless=HEADLESS,
-                slow_mo=SLOW_MO
-            )
-
+            browser = p.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO)
             page = browser.new_page()
 
-            print("[Executor] Navigating:", LOGIN_URL)
+            try:
+                print(f"[Executor] Navigating: {LOGIN_URL}")
+                page.goto(LOGIN_URL, wait_until="domcontentloaded")
+                page.wait_for_load_state("networkidle")
 
-            page.goto(LOGIN_URL)
+                page.locator(SELECTORS["email"]).fill(LOGIN_DATA["email"])
+                page.locator(SELECTORS["password"]).fill(LOGIN_DATA["password"])
+                page.locator(SELECTORS["submit"]).click()
 
-            page.wait_for_load_state("networkidle")
+                page.wait_for_timeout(800)
 
-            safe_fill(page, "email", LOGIN_DATA["email"])
-            safe_fill(page, "password", LOGIN_DATA["password"])
+                # Success signal: server redirects OR some UI element (you can enhance later)
+                if "dashboard" in page.url.lower():
+                    capture_dom(page, "Login", "success")
+                    save_screenshot(page, test_name, "passed")
+                    print("[Executor] Login success")
+                    return {"status": "passed", "error": None}
 
-            safe_click(page, "submit")
+                # UI error message
+                err = None
+                err_loc = page.locator(SELECTORS["error"])
+                if err_loc.count() > 0:
+                    err = err_loc.first.inner_text().strip()
 
-            page.wait_for_timeout(2000)
+                if not err:
+                    # Fallback: if your server returns JSON, your UI might not show error element.
+                    err = "Unknown login failure"
 
-            current_url = page.url
+                capture_dom(page, "Login", err)
+                shot = save_screenshot(page, test_name, "failed")
 
-            if "dashboard" in current_url.lower():
+                print("[Executor] Login failed:", err)
+                return {"status": "failed", "error": err, "screenshot": shot}
 
-                print("[Executor] Login success")
-
-                capture_dom(page, goal, "success")
-
+            finally:
+                # IMPORTANT: close browser while Playwright is still active (inside `with`)
                 browser.close()
-
-                return {
-                    "status": "passed",
-                    "error": None
-                }
-
-            error_element = page.locator("[data-test='login-error']")
-
-            if error_element.count() > 0:
-
-                error_text = error_element.inner_text()
-
-                print("[Executor] Login failed:", error_text)
-
-                capture_dom(page, goal, error_text)
-
-                browser.close()
-
-                return {
-                    "status": "failed",
-                    "error": error_text
-                }
-
-            print("[Executor] Unknown login failure")
-
-            capture_dom(page, goal, "unknown failure")
-
-            browser.close()
-
-            return {
-                "status": "failed",
-                "error": "Unknown failure"
-            }
 
     except Exception as e:
-
-        print("[Executor] Login exception:", str(e))
-
-        try:
-            capture_dom(page, goal, str(e))
-        except:
-            pass
-
         return {
             "status": "failed",
             "error": str(e),
-            "trace": traceback.format_exc()
+            "trace": traceback.format_exc(),
         }

@@ -1,110 +1,74 @@
 from playwright.sync_api import sync_playwright
 import traceback
 
-from src.agent.selector_healer import heal_selector
-from src.agent.dom_memory import capture_dom
 from src.config.config_loader import config
+from src.agent.dom_memory import capture_dom
+from src.reporting.html_reporter import save_screenshot
 
 
-BASE_URL = config["app"]["base_url"]
+BASE_URL = config["app"]["base_url"].rstrip("/")
 REGISTER_URL = f"{BASE_URL}/register"
 
-HEADLESS = config["browser"]["headless"]
-SLOW_MO = config["browser"]["slow_mo"]
+HEADLESS = bool(config["browser"].get("headless", True))
+SLOW_MO = int(config["browser"].get("slow_mo", 0))
 
 REGISTER_DATA = config["test_data"]["register"]
-
 
 SELECTORS = {
     "name": "[data-test='register-name']",
     "email": "[data-test='register-email']",
     "password": "[data-test='register-password']",
-    "submit": "[data-test='register-submit']"
+    "submit": "[data-test='register-submit']",
+    "success": "[data-test='register-success']",
+    "error": "[data-test='register-error']",
 }
 
 
-def safe_fill(page, field, value):
-
+def execute_register() -> dict:
+    test_name = "register"
     try:
-        page.locator(SELECTORS[field]).fill(value)
-
-    except Exception:
-
-        print(f"[Healer] Healing selector for {field}")
-
-        healed = heal_selector(page, SELECTORS[field], field)
-
-        SELECTORS[field] = healed
-
-        page.locator(healed).fill(value)
-
-
-def safe_click(page, field):
-
-    try:
-        page.locator(SELECTORS[field]).click()
-
-    except Exception:
-
-        healed = heal_selector(page, SELECTORS[field], field)
-
-        SELECTORS[field] = healed
-
-        page.locator(healed).click()
-
-
-def execute_register():
-
-    goal = "User registration"
-
-    try:
-
         with sync_playwright() as p:
-
-            browser = p.chromium.launch(
-                headless=HEADLESS,
-                slow_mo=SLOW_MO
-            )
-
+            browser = p.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO)
             page = browser.new_page()
 
-            print("[Executor] Navigating:", REGISTER_URL)
+            try:
+                print(f"[Executor] Navigating: {REGISTER_URL}")
+                page.goto(REGISTER_URL, wait_until="domcontentloaded")
+                page.wait_for_load_state("networkidle")
 
-            page.goto(REGISTER_URL)
+                page.locator(SELECTORS["name"]).fill(REGISTER_DATA["name"])
+                page.locator(SELECTORS["email"]).fill(REGISTER_DATA["email"])
+                page.locator(SELECTORS["password"]).fill(REGISTER_DATA["password"])
+                page.locator(SELECTORS["submit"]).click()
 
-            page.wait_for_load_state("networkidle")
+                page.wait_for_timeout(800)
 
-            # FIX: use correct config keys
-            safe_fill(page, "name", REGISTER_DATA["name"])
-            safe_fill(page, "email", REGISTER_DATA["email"])
-            safe_fill(page, "password", REGISTER_DATA["password"])
+                # Success check
+                if page.locator(SELECTORS["success"]).count() > 0:
+                    capture_dom(page, "Register", "success")
+                    save_screenshot(page, test_name, "passed")
+                    print("[Executor] Register success")
+                    return {"status": "passed", "error": None}
 
-            safe_click(page, "submit")
+                err = None
+                if page.locator(SELECTORS["error"]).count() > 0:
+                    err = page.locator(SELECTORS["error"]).first.inner_text().strip()
 
-            page.wait_for_timeout(2000)
+                if not err:
+                    err = "Register failed"
 
-            print("[Executor] Register success")
+                capture_dom(page, "Register", err)
+                shot = save_screenshot(page, test_name, "failed")
 
-            capture_dom(page, goal, "success")
+                print("[Executor] Register failed:", err)
+                return {"status": "failed", "error": err, "screenshot": shot}
 
-            browser.close()
-
-            return {
-                "status": "passed",
-                "error": None
-            }
+            finally:
+                browser.close()
 
     except Exception as e:
-
-        print("[Executor] Register failed:", str(e))
-
-        try:
-            capture_dom(page, goal, str(e))
-        except:
-            pass
-
         return {
             "status": "failed",
             "error": str(e),
-            "trace": traceback.format_exc()
+            "trace": traceback.format_exc(),
         }

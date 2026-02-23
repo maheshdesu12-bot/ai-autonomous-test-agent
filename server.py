@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 app = FastAPI()
 
-# in-memory database
+# In-memory user store
 USERS = {}
 
 
@@ -12,9 +12,9 @@ def root():
     return {"message": "AI Test Agent Server Running"}
 
 
-# ------------------------
+# -------------------------
 # REGISTER PAGE
-# ------------------------
+# -------------------------
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page():
@@ -32,11 +32,17 @@ def register_page():
 
             <input data-test="register-password" name="password" type="password" placeholder="Password"/>
 
-            <button data-test="register-submit" type="submit">
-                Register
-            </button>
+            <button data-test="register-submit" type="submit">Register</button>
 
         </form>
+
+        <div data-test="register-success" style="display:none;color:green;">
+            Register success
+        </div>
+
+        <div data-test="register-error" style="display:none;color:red;">
+            Register failed
+        </div>
 
     </body>
     </html>
@@ -44,23 +50,26 @@ def register_page():
 
 
 @app.post("/register")
-def register(
-    name: str = Form(...),
-    email: str = Form(...),
-    password: str = Form(...)
-):
+def register(name: str = Form(...), email: str = Form(...), password: str = Form(...)):
+
+    if email in USERS:
+        return HTMLResponse("""
+        <div data-test="register-error">User already exists</div>
+        """)
 
     USERS[email] = {
         "name": name,
         "password": password
     }
 
-    return RedirectResponse("/login", status_code=302)
+    return HTMLResponse("""
+    <div data-test="register-success">Register success</div>
+    """)
 
 
-# ------------------------
+# -------------------------
 # LOGIN PAGE
-# ------------------------
+# -------------------------
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page():
@@ -76,11 +85,13 @@ def login_page():
 
             <input data-test="login-password" name="password" type="password" placeholder="Password"/>
 
-            <button data-test="login-submit" type="submit">
-                Login
-            </button>
+            <button data-test="login-submit" type="submit">Login</button>
 
         </form>
+
+        <div data-test="login-error" style="display:none;color:red;">
+            Invalid credentials
+        </div>
 
     </body>
     </html>
@@ -88,24 +99,27 @@ def login_page():
 
 
 @app.post("/login")
-def login(
-    email: str = Form(...),
-    password: str = Form(...)
-):
+def login(email: str = Form(...), password: str = Form(...)):
 
     if email in USERS and USERS[email]["password"] == password:
 
         return RedirectResponse("/dashboard", status_code=302)
 
-    return HTMLResponse(
-        "<div data-test='login-error'>Invalid credentials</div>"
-    )
+    return HTMLResponse("""
+    <div data-test="login-error">Invalid credentials</div>
+    """)
 
 
-# ------------------------
+# -------------------------
 # DASHBOARD
-# ------------------------
+# -------------------------
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    return "<h1>Dashboard</h1>"
+    return """
+    <html>
+    <body>
+        <h2>Dashboard</h2>
+    </body>
+    </html>
+    """

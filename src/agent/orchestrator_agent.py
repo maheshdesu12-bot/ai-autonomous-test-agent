@@ -1,18 +1,50 @@
-from src.execution.parallel_executor import run_parallel_tests
-from src.reporting.test_reporter import save_test_report
+from src.agent.login_agent import LoginAgent
+from src.agent.register_agent import RegisterAgent
+from src.agent.planner_agent import PlannerAgent
+from src.reporting.html_reporter import generate_html_report
 
 
 class OrchestratorAgent:
 
+    def __init__(self):
+
+        self.login_agent = LoginAgent()
+        self.register_agent = RegisterAgent()
+        self.planner = PlannerAgent()
+
     def run(self):
 
-        print("[Orchestrator] Running parallel tests")
+        print("\n[Orchestrator] Starting autonomous execution")
 
-        results = run_parallel_tests()
+        plan = self.planner.create_plan()
 
-        for agent, result in results.items():
+        results = {}
 
-            save_test_report(agent, result)
+        for step in plan:
+
+            name = step["name"]
+
+            if step["depends_on"]:
+
+                dep = step["depends_on"]
+
+                if results[dep]["status"] != "passed":
+
+                    print(f"[Orchestrator] Skipping {name}")
+                    results[name] = {
+                        "status": "skipped"
+                    }
+                    continue
+
+            if name == "register":
+
+                results[name] = self.register_agent.run()
+
+            elif name == "login":
+
+                results[name] = self.login_agent.run()
+
+        generate_html_report(results)
 
         return results
 
@@ -21,6 +53,6 @@ if __name__ == "__main__":
 
     agent = OrchestratorAgent()
 
-    results = agent.run()
+    result = agent.run()
 
-    print(results)
+    print(result)

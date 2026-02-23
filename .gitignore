@@ -27,3 +27,6 @@ reports/*.json
 
 .env
 memory/
+reports/screenshots/
+playwright/.cache/
+node_modules/

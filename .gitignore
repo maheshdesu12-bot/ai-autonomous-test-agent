@@ -24,3 +24,6 @@ reports/*.json
 
 # Logs
 *.log
+
+.env
+memory/

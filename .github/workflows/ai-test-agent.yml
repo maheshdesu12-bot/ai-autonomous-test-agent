@@ -1,0 +1,54 @@
+name: AI Autonomous Test Agent CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  ai-test:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 30
+
+    strategy:
+      matrix:
+        python-version: [ "3.11" ]
+
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        playwright install chromium
+
+    - name: Start FastAPI test server
+      run: |
+        nohup uvicorn server:app --host 127.0.0.1 --port 8000 &
+        sleep 5
+
+    - name: Run Autonomous AI Test Agent
+      run: |
+        python -m src.agent.orchestrator_agent
+
+    - name: Generate HTML Report
+      run: |
+        python -m src.reporting.test_reporter || true
+
+    - name: Upload Test Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-test-report
+        path: reports/

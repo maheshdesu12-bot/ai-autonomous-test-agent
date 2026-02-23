@@ -1,0 +1,17 @@
+app:
+  base_url: http://127.0.0.1:8000
+
+browser:
+  headless: false
+  slow_mo: 500
+
+test_data:
+
+  register:
+    name: Test User
+    email: user@example.com
+    password: password123
+
+  login:
+    email: user@example.com
+    password: password123

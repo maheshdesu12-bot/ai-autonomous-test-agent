@@ -12,6 +12,7 @@ class OrchestratorAgent:
         self.register_agent = RegisterAgent()
         self.planner = PlannerAgent()
 
+
     def run(self):
 
         print("\n[Orchestrator] Starting autonomous execution")
@@ -24,25 +25,40 @@ class OrchestratorAgent:
 
             name = step["name"]
 
-            if step["depends_on"]:
+            try:
 
-                dep = step["depends_on"]
+                if name == "register":
 
-                if results[dep]["status"] != "passed":
+                    print("[Orchestrator] Running register")
 
-                    print(f"[Orchestrator] Skipping {name}")
+                    results[name] = self.register_agent.run()
+
+
+                elif name == "login":
+
+                    print("[Orchestrator] Running login")
+
+                    results[name] = self.login_agent.run()
+
+
+                else:
+
+                    print(f"[Orchestrator] Unknown step: {name}")
+
                     results[name] = {
-                        "status": "skipped"
+                        "status": "failed",
+                        "error": "Unknown step"
                     }
-                    continue
 
-            if name == "register":
+            except Exception as e:
 
-                results[name] = self.register_agent.run()
+                print(f"[Orchestrator] Step failed: {name} → {e}")
 
-            elif name == "login":
+                results[name] = {
+                    "status": "failed",
+                    "error": str(e)
+                }
 
-                results[name] = self.login_agent.run()
 
         generate_html_report(results)
 

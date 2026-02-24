@@ -17,6 +17,8 @@ SELECTORS = {
     "email": "[data-test='register-email']",
     "password": "[data-test='register-password']",
     "submit": "[data-test='register-submit']",
+
+    # optional UI selectors
     "success": "[data-test='register-success']",
     "error": "[data-test='register-error']",
 }
@@ -25,12 +27,15 @@ SELECTORS = {
 executor = BaseExecutor(HEADLESS, SLOW_MO)
 
 
-def save_user_to_db(name, email, password):
+# --------------------------------------------------
+# Optional memory storage ONLY (not validation)
+# --------------------------------------------------
+
+def save_user_to_memory(name, email, password):
 
     existing = users_collection.find_one({"email": email})
 
     if existing:
-        print("[DB] User already exists")
         return False
 
     users_collection.insert_one({
@@ -39,10 +44,12 @@ def save_user_to_db(name, email, password):
         "password": password
     })
 
-    print("[DB] User saved")
-
     return True
 
+
+# --------------------------------------------------
+# Main executor
+# --------------------------------------------------
 
 def execute_register():
 
@@ -54,23 +61,36 @@ def execute_register():
 
         for user in users:
 
+            name = user["name"]
             email = user["email"]
+            password = user["password"]
 
             try:
 
                 print(f"[Executor] Register: {email}")
 
+                # Capture BEFORE state
+                existed_before = users_collection.find_one({
+                    "email": email
+                })
+
                 page.goto(REGISTER_URL)
 
-                page.locator(SELECTORS["name"]).fill(user["name"])
-                page.locator(SELECTORS["email"]).fill(user["email"])
-                page.locator(SELECTORS["password"]).fill(user["password"])
+                page.locator(SELECTORS["name"]).fill(name)
+                page.locator(SELECTORS["email"]).fill(email)
+                page.locator(SELECTORS["password"]).fill(password)
 
                 page.locator(SELECTORS["submit"]).click()
 
                 page.wait_for_timeout(1500)
 
-                # Safe detection
+                print(f"[Executor] URL after register: {page.url}")
+
+                # Capture AFTER state
+                existed_after = users_collection.find_one({
+                    "email": email
+                })
+
                 success_visible = page.locator(
                     SELECTORS["success"]
                 ).count() > 0
@@ -79,25 +99,48 @@ def execute_register():
                     SELECTORS["error"]
                 ).count() > 0
 
-                current_url = page.url.lower()
+                page_content = page.content().lower()
 
-                print(f"[Executor] Current URL: {current_url}")
+                # -----------------------------------------
+                # SUCCESS CRITERIA
+                # -----------------------------------------
 
+                success = False
 
-                # SUCCESS CONDITIONS
-                if (
-                    success_visible
-                    or "login" in current_url
-                    or "dashboard" in current_url
+                # Case 1: DB state changed (most reliable)
+                if not existed_before and existed_after:
+                    success = True
+
+                # Case 2: UI success selector visible
+                elif success_visible:
+                    success = True
+
+                # Case 3: success message visible
+                elif (
+                    "registration successful" in page_content
+                    or "registered successfully" in page_content
+                    or "account created" in page_content
+                    or "user created" in page_content
                 ):
+                    success = True
 
-                    save_user_to_db(
-                        user["name"],
-                        user["email"],
-                        user["password"]
+                # Case 4: error visible
+                elif error_visible:
+                    success = False
+
+                # -----------------------------------------
+                # RESULT HANDLING
+                # -----------------------------------------
+
+                if success:
+
+                    save_user_to_memory(
+                        name,
+                        email,
+                        password
                     )
 
-                    print("[Executor] Register success")
+                    print("[Executor] Register SUCCESS")
 
                     results.append(
                         executor.handle_success(
@@ -107,46 +150,22 @@ def execute_register():
                         )
                     )
 
-
-                # ERROR CONDITIONS
-                elif error_visible:
-
-                    error = page.locator(
-                        SELECTORS["error"]
-                    ).inner_text()
-
-                    print(f"[Executor] Register failed: {error}")
-
-                    results.append(
-                        executor.handle_failure(
-                            page,
-                            "register",
-                            email,
-                            error
-                        )
-                    )
-
-
-                # FALLBACK SAFE FAILURE
                 else:
 
-                    print(
-                        f"[Executor] Register failed - Unknown state (URL: {current_url})"
-                    )
+                    print("[Executor] Register FAILED")
 
                     results.append(
                         executor.handle_failure(
                             page,
                             "register",
                             email,
-                            f"Unknown state - URL: {current_url}"
+                            "Registration failed or user already exists"
                         )
                     )
-
 
             except Exception as e:
 
-                print(f"[Executor] Exception for {email}: {e}")
+                print(f"[Executor] Exception during register: {e}")
 
                 results.append(
                     executor.handle_failure(

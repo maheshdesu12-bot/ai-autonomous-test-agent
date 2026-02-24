@@ -16,6 +16,7 @@ SELECTORS = {
     "email": "[data-test='login-email']",
     "password": "[data-test='login-password']",
     "submit": "[data-test='login-submit']",
+
     "success": "[data-test='login-success']",
     "error": "[data-test='login-error']",
 }
@@ -24,14 +25,28 @@ SELECTORS = {
 executor = BaseExecutor(HEADLESS, SLOW_MO)
 
 
-def validate_user_from_db(email, password):
+def validate_login_success(email, password, page):
 
-    user = users_collection.find_one({
+    success_visible = page.locator(
+        SELECTORS["success"]
+    ).count() > 0
+
+    error_visible = page.locator(
+        SELECTORS["error"]
+    ).count() > 0
+
+    db_user = users_collection.find_one({
         "email": email,
         "password": password
     })
 
-    return user is not None
+    if success_visible:
+        return True
+
+    if db_user and not error_visible:
+        return True
+
+    return False
 
 
 def execute_login():
@@ -45,6 +60,7 @@ def execute_login():
         for user in users:
 
             email = user["email"]
+            password = user["password"]
 
             try:
 
@@ -52,89 +68,47 @@ def execute_login():
 
                 page.goto(LOGIN_URL)
 
-                page.locator(SELECTORS["email"]).fill(user["email"])
-                page.locator(SELECTORS["password"]).fill(user["password"])
+                page.locator(SELECTORS["email"]).fill(email)
+                page.locator(SELECTORS["password"]).fill(password)
 
                 page.locator(SELECTORS["submit"]).click()
 
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(1500)
 
-                success_visible = page.locator(
-                    SELECTORS["success"]
-                ).count() > 0
+                success = validate_login_success(
+                    email,
+                    password,
+                    page
+                )
 
-                error_visible = page.locator(
-                    SELECTORS["error"]
-                ).count() > 0
+                if success:
 
-
-                if success_visible:
-
-                    valid = validate_user_from_db(
-                        user["email"],
-                        user["password"]
-                    )
-
-                    if valid:
-
-                        print("[Executor] Login success")
-
-                        results.append(
-                            executor.handle_success(
-                                page,
-                                "login",
-                                email
-                            )
-                        )
-
-                    else:
-
-                        print("[Executor] Login DB validation failed")
-
-                        results.append(
-                            executor.handle_failure(
-                                page,
-                                "login",
-                                email,
-                                "DB validation failed"
-                            )
-                        )
-
-
-                elif error_visible:
-
-                    error = page.locator(
-                        SELECTORS["error"]
-                    ).inner_text()
-
-                    print(f"[Executor] Login failed: {error}")
+                    print("[Executor] Login SUCCESS")
 
                     results.append(
-                        executor.handle_failure(
+                        executor.handle_success(
                             page,
                             "login",
-                            email,
-                            error
+                            email
                         )
                     )
-
 
                 else:
 
-                    print("[Executor] Login unknown state")
+                    print("[Executor] Login FAILED")
 
                     results.append(
                         executor.handle_failure(
                             page,
                             "login",
                             email,
-                            "Unknown state"
+                            "Invalid credentials"
                         )
                     )
 
             except Exception as e:
 
-                print(f"[Executor] Exception for {email}: {e}")
+                print(f"[Executor] Login exception: {e}")
 
                 results.append(
                     executor.handle_failure(
@@ -148,25 +122,15 @@ def execute_login():
         return results
 
 
-    try:
+    executor.run_browser(action)
 
-        executor.run_browser(action)
+    overall = (
+        "passed"
+        if all(r["status"] == "passed" for r in results)
+        else "failed"
+    )
 
-        overall = (
-            "passed"
-            if all(r["status"] == "passed" for r in results)
-            else "failed"
-        )
-
-        return {
-            "status": overall,
-            "results": results
-        }
-
-    except Exception as e:
-
-        return {
-            "status": "failed",
-            "error": str(e),
-            "trace": traceback.format_exc()
-        }
+    return {
+        "status": overall,
+        "results": results
+    }

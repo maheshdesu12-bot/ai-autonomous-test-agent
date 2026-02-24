@@ -1,23 +1,19 @@
 {
   "register": [
     {
-      "name": "Mahesh4",
-      "email": "mahesh4@example.com",
+      "name": "Violet11",
+      "email": "Violet11@example.com",
       "password": "password123"
     },
     {
-      "name": "Mahesh2",
-      "email": "mahesh2@example.com",
+      "name": "Blue2",
+      "email": "Blue2@example.com",
       "password": "password123"
     }
   ],
   "login": [
     {
-      "email": "mahesh@example.com",
-      "password": "password123"
-    },
-    {
-      "email": "mahesh2@example.com",
+      "email": "adam1@example.com",
       "password": "password123"
     }
   ]

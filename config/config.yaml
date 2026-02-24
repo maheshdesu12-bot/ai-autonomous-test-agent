@@ -5,11 +5,6 @@ browser:
   headless: false
   slow_mo: 200
 
-mongodb:
-  uri: "mongodb+srv://maheshdesu12_db_user:dRfBHuvqlTR85KEJ@cluster0.zi7s64o.mongodb.net/?appName=Cluster0"
-  database: "ai_test_agent"
-  collection: "users"
-
 test_data:
 
   register:

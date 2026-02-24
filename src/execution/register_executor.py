@@ -1,9 +1,8 @@
-from playwright.sync_api import sync_playwright
 import traceback
 
 from src.config.config_loader import config
-from src.agent.dom_memory import capture_dom
-from src.reporting.html_reporter import save_screenshot
+from src.db.mongo_client import users_collection
+from src.agent.base_executor import BaseExecutor
 
 
 BASE_URL = config["app"]["base_url"].rstrip("/")
@@ -12,7 +11,6 @@ REGISTER_URL = f"{BASE_URL}/register"
 HEADLESS = bool(config["browser"].get("headless", True))
 SLOW_MO = int(config["browser"].get("slow_mo", 0))
 
-REGISTER_DATA = config["test_data"]["register"]
 
 SELECTORS = {
     "name": "[data-test='register-name']",
@@ -24,51 +22,163 @@ SELECTORS = {
 }
 
 
-def execute_register() -> dict:
-    test_name = "register"
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO)
-            page = browser.new_page()
+executor = BaseExecutor(HEADLESS, SLOW_MO)
+
+
+def save_user_to_db(name, email, password):
+
+    existing = users_collection.find_one({"email": email})
+
+    if existing:
+        print("[DB] User already exists")
+        return False
+
+    users_collection.insert_one({
+        "name": name,
+        "email": email,
+        "password": password
+    })
+
+    print("[DB] User saved")
+
+    return True
+
+
+def execute_register():
+
+    users = executor.load_users("register")
+
+    results = []
+
+    def action(page):
+
+        for user in users:
+
+            email = user["email"]
 
             try:
-                print(f"[Executor] Navigating: {REGISTER_URL}")
-                page.goto(REGISTER_URL, wait_until="domcontentloaded")
-                page.wait_for_load_state("networkidle")
 
-                page.locator(SELECTORS["name"]).fill(REGISTER_DATA["name"])
-                page.locator(SELECTORS["email"]).fill(REGISTER_DATA["email"])
-                page.locator(SELECTORS["password"]).fill(REGISTER_DATA["password"])
+                print(f"[Executor] Register: {email}")
+
+                page.goto(REGISTER_URL)
+
+                page.locator(SELECTORS["name"]).fill(user["name"])
+                page.locator(SELECTORS["email"]).fill(user["email"])
+                page.locator(SELECTORS["password"]).fill(user["password"])
+
                 page.locator(SELECTORS["submit"]).click()
 
-                page.wait_for_timeout(800)
+                page.wait_for_timeout(1500)
 
-                # Success check
-                if page.locator(SELECTORS["success"]).count() > 0:
-                    capture_dom(page, "Register", "success")
-                    save_screenshot(page, test_name, "passed")
+                # Safe detection
+                success_visible = page.locator(
+                    SELECTORS["success"]
+                ).count() > 0
+
+                error_visible = page.locator(
+                    SELECTORS["error"]
+                ).count() > 0
+
+                current_url = page.url.lower()
+
+                print(f"[Executor] Current URL: {current_url}")
+
+
+                # SUCCESS CONDITIONS
+                if (
+                    success_visible
+                    or "login" in current_url
+                    or "dashboard" in current_url
+                ):
+
+                    save_user_to_db(
+                        user["name"],
+                        user["email"],
+                        user["password"]
+                    )
+
                     print("[Executor] Register success")
-                    return {"status": "passed", "error": None}
 
-                err = None
-                if page.locator(SELECTORS["error"]).count() > 0:
-                    err = page.locator(SELECTORS["error"]).first.inner_text().strip()
+                    results.append(
+                        executor.handle_success(
+                            page,
+                            "register",
+                            email
+                        )
+                    )
 
-                if not err:
-                    err = "Register failed"
 
-                capture_dom(page, "Register", err)
-                shot = save_screenshot(page, test_name, "failed")
+                # ERROR CONDITIONS
+                elif error_visible:
 
-                print("[Executor] Register failed:", err)
-                return {"status": "failed", "error": err, "screenshot": shot}
+                    error = page.locator(
+                        SELECTORS["error"]
+                    ).inner_text()
 
-            finally:
-                browser.close()
+                    print(f"[Executor] Register failed: {error}")
+
+                    results.append(
+                        executor.handle_failure(
+                            page,
+                            "register",
+                            email,
+                            error
+                        )
+                    )
+
+
+                # FALLBACK SAFE FAILURE
+                else:
+
+                    print(
+                        f"[Executor] Register failed - Unknown state (URL: {current_url})"
+                    )
+
+                    results.append(
+                        executor.handle_failure(
+                            page,
+                            "register",
+                            email,
+                            f"Unknown state - URL: {current_url}"
+                        )
+                    )
+
+
+            except Exception as e:
+
+                print(f"[Executor] Exception for {email}: {e}")
+
+                results.append(
+                    executor.handle_failure(
+                        page,
+                        "register",
+                        email,
+                        str(e)
+                    )
+                )
+
+        return results
+
+
+    try:
+
+        executor.run_browser(action)
+
+        overall = (
+            "passed"
+            if all(r["status"] == "passed" for r in results)
+            else "failed"
+        )
+
+        return {
+            "status": overall,
+            "results": results
+        }
 
     except Exception as e:
+
         return {
             "status": "failed",
             "error": str(e),
-            "trace": traceback.format_exc(),
+            "trace": traceback.format_exc()
         }

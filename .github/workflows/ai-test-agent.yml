@@ -3,21 +3,19 @@ name: AI Autonomous Test Agent CI/CD
 on:
   push:
     branches: [ main ]
-
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-
   ai-test:
-
     runs-on: ubuntu-latest
 
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      MONGO_URI: ${{ secrets.MONGO_URI }}
 
     steps:
-
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -28,12 +26,13 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          playwright install chromium
+          playwright install --with-deps chromium
 
       - name: Start FastAPI server
         run: |
-          nohup uvicorn server:app --host 127.0.0.1 --port 8000 &
+          nohup uvicorn server:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
           sleep 5
 
       - name: Run Autonomous AI Test Agent
@@ -41,13 +40,10 @@ jobs:
           python -m src.agent.orchestrator_agent
 
       - name: Upload test reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-report
-          path: reports/
-
-      - name: Run Agent
-        env:
-          MONGO_URI: ${{ secrets.MONGO_URI }}
-        run: |
-          python -m src.agent.orchestrator_agent
+          path: |
+            reports/
+            uvicorn.log

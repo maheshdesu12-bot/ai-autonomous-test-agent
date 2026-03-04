@@ -45,3 +45,9 @@ jobs:
         with:
           name: test-report
           path: reports/
+
+      - name: Run Agent
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+        run: |
+          python -m src.agent.orchestrator_agent
